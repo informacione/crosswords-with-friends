@@ -323,17 +323,23 @@ public class GUI {
     @Override
     public ModelAndView handle(Request req, Response res) {
 
-      Integer id2 = ONEPLAYERID.getAndIncrement();
-
-      while (crosswordCache.containsKey(id2)) {
-        id2 = ONEPLAYERID.getAndIncrement();
-      }
-
       Crossword puzzle = createCrossword();
       puzzle.addPlayer();
-
       Box[][] crossword = puzzle.getArray();
-      crosswordCache.put(id2, puzzle);
+
+      Integer id2;
+      synchronized (Chat.getRoomUsers()) {
+        id2 = ONEPLAYERID.getAndIncrement();
+
+        while (crosswordCache.containsKey(id2)) {
+          id2 = ONEPLAYERID.getAndIncrement();
+        }
+
+        // A two-player socket may still be parked on this number; it must not
+        // count as a member of the new game's room.
+        Chat.getRoomUsers().remove(id2);
+        crosswordCache.put(id2, puzzle);
+      }
       System.out.println(puzzle);
 
       ImmutableMap<String, Object> variables =

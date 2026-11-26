@@ -31,13 +31,15 @@ public class OneChatWebSocketHandler {
 
   @OnWebSocketConnect
   public void onConnect(Session user) throws Exception {
-    int nextRoomNumber = GUI.ONEPLAYERID.get() - 1;
+    synchronized (Chat.getRoomUsers()) {
+      int nextRoomNumber = GUI.ONEPLAYERID.get() - 1;
 
-    List<Session> usersInRoom = new ArrayList<Session>();
-    usersInRoom.add(user);
-    Chat.getRoomUsers().put(nextRoomNumber, usersInRoom);
+      List<Session> usersInRoom = new ArrayList<Session>();
+      usersInRoom.add(user);
+      Chat.getRoomUsers().put(nextRoomNumber, usersInRoom);
 
-    userRoom.put(user, nextRoomNumber);
+      userRoom.put(user, nextRoomNumber);
+    }
   }
 
   /** This method returns the room number given a user id.
@@ -58,14 +60,18 @@ public class OneChatWebSocketHandler {
 
   @OnWebSocketMessage
   public void onMessage(Session user, String message) {
+    Integer roomNumber = Chat.getMemberRoom(userRoom, user);
+    if (roomNumber == null) {
+      return;
+    }
     if (message.startsWith("DATA")) {
-      Chat.broadcastCorrect(message, userRoom.get(user));
+      Chat.broadcastCorrect(message, roomNumber);
     } else if (message.startsWith("LETTER")) {
-      Chat.broadcastLetter(message, userRoom.get(user));
+      Chat.broadcastLetter(message, roomNumber);
     } else if (message.startsWith("ANAGRAM")) {
-      Chat.broadcastAnagram(message, userRoom.get(user));
+      Chat.broadcastAnagram(message, roomNumber);
     } else if (message.startsWith("**ALL**")) {
-      Chat.broadcastAll(user, userRoom.get(user));
+      Chat.broadcastAll(user, roomNumber);
     }
   }
 
