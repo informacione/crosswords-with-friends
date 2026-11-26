@@ -167,6 +167,26 @@ public final class Chat {
     init();
   }
 
+  /** This method returns the room a session is mapped to, but only while the
+   * session is still in that room's member list.
+   *
+   * @param userRoom the handler's map of sessions to room ids
+   * @param user the session
+   * @return the room id, or null if the session is not a member of it */
+  static Integer getMemberRoom(Map<Session, Integer> userRoom, Session user) {
+    synchronized (roomUsers) {
+      Integer roomId = userRoom.get(user);
+      if (roomId == null) {
+        return null;
+      }
+      List<Session> members = roomUsers.get(roomId);
+      if (members == null || !members.contains(user)) {
+        return null;
+      }
+      return roomId;
+    }
+  }
+
   /** This method sets the words that need to be censored from the list of words
    * in the clues in the given room id.
    *
@@ -259,9 +279,21 @@ public final class Chat {
    * @param roomId the room id */
   public static void broadcastMessage(String sender, String message,
       Integer roomId) {
+    broadcastMessage(sender, message, roomId, roomUsers.get(roomId));
+  }
+
+  /** This method sends a message from one user to the given sessions, censored
+   * with the words of the given room.
+   *
+   * @param sender the user who sent the message
+   * @param message the message
+   * @param roomId the room id
+   * @param recipients the sessions to send the message to */
+  public static void broadcastMessage(String sender, String message,
+      Integer roomId, List<Session> recipients) {
     try {
-      if (roomUsers.get(roomId) != null) {
-        for (Session session : roomUsers.get(roomId)) {
+      if (recipients != null) {
+        for (Session session : recipients) {
           if (session.isOpen()) {
             session.getRemote().sendString(
                 String.valueOf(new JSONObject().put(

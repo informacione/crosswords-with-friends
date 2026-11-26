@@ -33,27 +33,30 @@ public class TwoChatWebSocketHandler {
 
   @OnWebSocketConnect
   public void onConnect(Session user) throws Exception {
+    int nextRoomNumber;
+    String username;
+    synchronized (Chat.getRoomUsers()) {
+      nextRoomNumber = GUI.TWOPLAYERID.get();
+      // roomUsers maps room#s to list of sessions
+      List<Session> usersInRoom = new ArrayList<Session>();
+      if (Chat.getRoomUsers().get(nextRoomNumber) != null) {
+        usersInRoom = Chat.getRoomUsers().get(nextRoomNumber);
+        GUI.TWOPLAYERID.getAndIncrement();
+      }
 
-    int nextRoomNumber = GUI.TWOPLAYERID.get();
-    // roomUsers maps room#s to list of sessions
-    List<Session> usersInRoom = new ArrayList<Session>();
-    if (Chat.getRoomUsers().get(nextRoomNumber) != null) {
-      usersInRoom = Chat.getRoomUsers().get(nextRoomNumber);
-      GUI.TWOPLAYERID.getAndIncrement();
+      usersInRoom.add(user);
+      Chat.getRoomUsers().put(nextRoomNumber, usersInRoom);
+
+      username = "down" + nextRoomNumber;
+      // userUsernameMap maps sessions to usernames
+      if (Chat.getUserUsernameMap().containsValue(username)) {
+        username = "across" + nextRoomNumber;
+      }
+      Chat.getUserUsernameMap().put(user, username);
+
+      // userRoom maps sessions to room#s
+      userRoom.put(user, nextRoomNumber);
     }
-
-    usersInRoom.add(user);
-    Chat.getRoomUsers().put(nextRoomNumber, usersInRoom);
-
-    String username = "down" + nextRoomNumber;
-    // userUsernameMap maps sessions to usernames
-    if (Chat.getUserUsernameMap().containsValue(username)) {
-      username = "across" + nextRoomNumber;
-    }
-    Chat.getUserUsernameMap().put(user, username);
-
-    // userRoom maps sessions to room#s
-    userRoom.put(user, nextRoomNumber);
 
     Chat.broadcastStart("Server", (username + " joined the chat"),
         nextRoomNumber);
@@ -78,21 +81,33 @@ public class TwoChatWebSocketHandler {
 
   @OnWebSocketClose
   public void onClose(Session user, int statusCode, String reason) {
-    // if the only person in the chat room, set roomUsers(roomNumber) to null
-    String username = Chat.getUserUsernameMap().get(user);
-    Chat.getUserUsernameMap().remove(user);
+    String username;
+    Integer roomNumber;
+    List<Session> remaining;
+    synchronized (Chat.getRoomUsers()) {
+      username = Chat.getUserUsernameMap().remove(user);
+      roomNumber = userRoom.remove(user);
+      if (roomNumber == null) {
+        return;
+      }
 
-    Integer roomNumber = userRoom.get(user);
-    userRoom.remove(user);
-
-    List<Session> usersInChat = Chat.getRoomUsers().get(roomNumber);
-    if (usersInChat.size() == 1) {
-      Chat.getRoomUsers().remove(roomNumber);
-      GUI.removeCrossword(roomNumber);
-    } else {
-      usersInChat.remove(user);
+      // A one-player game can reuse this room number and replace its list, so
+      // only act on a list this session is still a member of.
+      List<Session> usersInChat = Chat.getRoomUsers().get(roomNumber);
+      if (usersInChat == null || !usersInChat.remove(user)) {
+        return;
+      }
+      if (usersInChat.isEmpty()) {
+        if (Chat.getRoomUsers().get(roomNumber) == usersInChat) {
+          Chat.getRoomUsers().remove(roomNumber);
+          GUI.removeCrossword(roomNumber);
+        }
+        return;
+      }
+      remaining = new ArrayList<Session>(usersInChat);
     }
-    Chat.broadcastMessage("Server", (username + " left the chat"), roomNumber);
+    Chat.broadcastMessage("Server", (username + " left the chat"), roomNumber,
+        remaining);
   }
 
   /** This function determines what message to send to the chatroom depending on
@@ -103,21 +118,25 @@ public class TwoChatWebSocketHandler {
    * @param message the message */
   @OnWebSocketMessage
   public void onMessage(Session user, String message) {
+    Integer roomNumber = Chat.getMemberRoom(userRoom, user);
+    if (roomNumber == null) {
+      return;
+    }
     if (message.startsWith("DATA")) {
-      Chat.broadcastCorrect(message, userRoom.get(user));
+      Chat.broadcastCorrect(message, roomNumber);
     } else if (message.startsWith("**ALL**")) {
-      Chat.broadcastAll(user, userRoom.get(user));
+      Chat.broadcastAll(user, roomNumber);
     } else if (message.startsWith("LETTER")) {
-      Chat.broadcastLetter(message, userRoom.get(user));
+      Chat.broadcastLetter(message, roomNumber);
     } else if (message.startsWith("ANAGRAM")) {
-      Chat.broadcastAnagram(message, userRoom.get(user));
+      Chat.broadcastAnagram(message, roomNumber);
     } else if (message.startsWith("**CONVERT**")) {
-      Chat.broadcastConvert(user, userRoom.get(user));
+      Chat.broadcastConvert(user, roomNumber);
     } else if (message.startsWith("**END**")) {
-      Chat.broadcastEnd(message, user, userRoom.get(user));
+      Chat.broadcastEnd(message, user, roomNumber);
     } else {
       Chat.broadcastMessage(Chat.getUserUsernameMap().get(user), message,
-          userRoom.get(user));
+          roomNumber);
     }
   }
 
