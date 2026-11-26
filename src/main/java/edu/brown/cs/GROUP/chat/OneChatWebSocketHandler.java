@@ -2,12 +2,13 @@ package edu.brown.cs.GROUP.chat;
 
 import edu.brown.cs.GROUP.crosswordswithFriends.GUI;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.annotations.OnWebSocketClose;
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketConnect;
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketMessage;
 import org.eclipse.jetty.websocket.api.annotations.WebSocket;
@@ -31,13 +32,32 @@ public class OneChatWebSocketHandler {
 
   @OnWebSocketConnect
   public void onConnect(Session user) throws Exception {
-    int nextRoomNumber = GUI.ONEPLAYERID.get() - 1;
+    synchronized (Chat.getRoomLock()) {
+      int nextRoomNumber = GUI.ONEPLAYERID.get() - 1;
 
-    List<Session> usersInRoom = new ArrayList<Session>();
-    usersInRoom.add(user);
-    Chat.getRoomUsers().put(nextRoomNumber, usersInRoom);
+      List<Session> usersInRoom = new CopyOnWriteArrayList<Session>();
+      usersInRoom.add(user);
+      Chat.getRoomUsers().put(nextRoomNumber, usersInRoom);
 
-    userRoom.put(user, nextRoomNumber);
+      userRoom.put(user, nextRoomNumber);
+    }
+  }
+
+  /** This method releases the user's session when the socket closes.
+   *
+   * @param user the user
+   * @param statusCode the status code
+   * @param reason what happened */
+
+  @OnWebSocketClose
+  public void onClose(Session user, int statusCode, String reason) {
+    synchronized (Chat.getRoomLock()) {
+      Integer roomNumber = userRoom.remove(user);
+      List<Session> room = Chat.getRoomUsers().get(roomNumber);
+      if (room != null && room.remove(user) && room.isEmpty()) {
+        Chat.getRoomUsers().remove(roomNumber);
+      }
+    }
   }
 
   /** This method returns the room number given a user id.
