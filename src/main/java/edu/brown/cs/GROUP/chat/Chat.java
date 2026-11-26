@@ -17,9 +17,12 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -92,7 +95,7 @@ public final class Chat {
    * with different exclusive people.
    */
   private static Map<Integer, List<Session>> roomUsers =
-      new HashMap<Integer, List<Session>>();
+      Collections.synchronizedMap(new HashMap<Integer, List<Session>>());
 
   /**
    * This is an accessor method for the hashmap of room IDs to users.
@@ -104,12 +107,29 @@ public final class Chat {
   }
 
   /**
-   * This is a hashmap of sessions to an integer indicating the state of the end
-   * of the game.
+   * Guards roomUsers membership and endGameData so that an end-game choice can
+   * never be stored for a room after its members have left.
+   */
+  private static final Object ROOM_LOCK = new Object();
+
+  /**
+   * This is an accessor method for the lock guarding room membership.
+   * @return the lock
+   */
+
+  public static Object getRoomLock() {
+    return ROOM_LOCK;
+  }
+
+  /**
+   * This is a map of live room lists to an integer indicating the state of the
+   * end of the game. Keyed by identity because the lists change as players
+   * join and leave.
    */
 
   private static Map<List<Session>, Integer> endGameData =
-      new HashMap<List<Session>, Integer>();
+      Collections.synchronizedMap(
+          new IdentityHashMap<List<Session>, Integer>());
 
   /**
    * This is an accessor method for the hashmap of sessions to end game data.
@@ -362,49 +382,78 @@ public final class Chat {
   // 3 second player decided to show
   public static void broadcastEnd(String message, Session user,
       Integer roomId) {
+    String[] parts = message.split(":");
+    if (parts.length < 2) {
+      return;
+    }
+    String choice = parts[1];
     String toSend = "**END**:";
-    String choice = message.split(":")[1];
-    List<Session> room = roomUsers.get(roomId);
-    // if (room != null) {
-    // what is this supposed to be doing?
-    // }
-    if (choice.equals("continue")) {
-      // get other's choice
+    // the player who chose continue first is answered when the other chooses,
+    // so no handler thread waits on the other player
+    List<Session> recipients = new ArrayList<Session>();
+    synchronized (ROOM_LOCK) {
+      List<Session> room = roomUsers.get(roomId);
+      if (room == null || !room.contains(user) || !user.isOpen()) {
+        return;
+      }
       Integer combined = endGameData.get(room);
-      if (combined == null) {
-        endGameData.put(room, 0);
-        while (true) {
-          combined = endGameData.get(room);
-          if (combined != 0) {
-            break;
+      if (choice.equals("continue")) {
+        if (combined == null) {
+          endGameData.put(room, 0);
+        } else {
+          endGameData.put(room, 2);
+          if (combined == 0) {
+            toSend += "continue";
+            recipients.addAll(room);
+          } else {
+            if (combined == 1) {
+              toSend += "show";
+            }
+            recipients.add(user);
           }
         }
-        if (combined == 2) {
-
-          toSend += "continue";
-        } else if (combined == THREE) {
-          toSend += "show";
-        }
-      } else {
-        endGameData.put(room, 2);
-        if (combined == 0) {
-          toSend += "continue";
-        } else if (combined == 1) {
-          toSend += "show";
+      } else if (choice.equals("show")) {
+        if (combined == null) {
+          endGameData.put(room, 1);
+        } else {
+          endGameData.put(room, THREE);
+          if (combined == 0) {
+            toSend += "show";
+            recipients.addAll(room);
+            recipients.remove(user);
+          }
         }
       }
+    }
+    for (Session session : recipients) {
       try {
-        if (user.isOpen()) {
-          user.getRemote().sendString(toSend);
+        if (session.isOpen()) {
+          session.getRemote().sendString(toSend);
         }
       } catch (Exception e) {
         e.printStackTrace();
       }
-    } else if (choice.equals("show")) {
-      if (!endGameData.containsKey(room)) {
-        endGameData.put(room, 1);
-      } else {
-        endGameData.put(room, THREE);
+    }
+  }
+
+  /**
+   * Removes a user from a room, dropping the room's end-game state so no
+   * closed session stays reachable from it. The room and its crossword are
+   * removed once the last member leaves.
+   * @param user the user leaving
+   * @param roomId the room id
+   */
+
+  public static void leaveRoom(Session user, Integer roomId) {
+    synchronized (ROOM_LOCK) {
+      List<Session> room = roomUsers.get(roomId);
+      if (room == null || !room.remove(user)) {
+        return;
+      }
+      endGameData.remove(room);
+      if (room.isEmpty()) {
+        roomUsers.remove(roomId);
+        GUI.removeCrossword(roomId);
       }
     }
   }
