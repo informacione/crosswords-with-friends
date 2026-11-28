@@ -256,6 +256,7 @@ public class GUI {
       String player = "ACROSS";
 
       Integer id2 = TWOPLAYERID.get();
+      Integer abandoned = null;
 
       Crossword puzzle = crosswordCache.get(id2);
 
@@ -265,6 +266,7 @@ public class GUI {
       } else if (puzzle.getPlayers() != 2) {
         puzzle.addPlayer();
       } else {
+        abandoned = id2;
         TWOPLAYERID.set(ONEPLAYERID.get());
         id2 = TWOPLAYERID.get();
         puzzle = createCrossword();
@@ -272,12 +274,24 @@ public class GUI {
       }
 
       List<Word> toPass = puzzle.getFinalList();
-      Chat.setCensorWords(id2, toPass);
 
       Box[][] crossword = puzzle.getArray();
       System.out.println(puzzle);
 
-      crosswordCache.put(id2, puzzle);
+      synchronized (Chat.getRoomLock()) {
+        // nothing will ever join or leave a room id matchmaking has moved
+        // past while no socket is in it, so its entries would never be freed
+        if (abandoned != null && !abandoned.equals(id2)
+            && Chat.getRoomUsers().get(abandoned) == null) {
+          crosswordCache.remove(abandoned);
+          Chat.removeCensorWords(abandoned);
+        }
+        if (id2.intValue() == TWOPLAYERID.get()
+            || Chat.getRoomUsers().get(id2) != null) {
+          Chat.setCensorWords(id2, toPass);
+          crosswordCache.put(id2, puzzle);
+        }
+      }
       System.out.println(puzzle);
 
       ImmutableMap<String, Object> variables =

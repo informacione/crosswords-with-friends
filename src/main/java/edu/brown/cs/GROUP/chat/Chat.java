@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.jetty.websocket.api.Session;
 import org.json.JSONObject;
@@ -123,16 +124,32 @@ public final class Chat {
   /**
    * This is a hashmap of rooms to words to censor.
    */
-  private static HashMap<Integer, Set<String>> wordsToCensor =
-      new HashMap<Integer, Set<String>>();
+  private static Map<Integer, Set<String>> wordsToCensor =
+      new ConcurrentHashMap<Integer, Set<String>>();
 
   /**
-   * This is an accessor method for the hashmap of rooms to censored words.
-   * @return the hashmap
+   * This is an accessor method for the map of rooms to censored words.
+   * @return the map
    */
 
-  public static HashMap<Integer, Set<String>> getWordsToCensor() {
+  public static Map<Integer, Set<String>> getWordsToCensor() {
     return wordsToCensor;
+  }
+
+  /**
+   * Guards two-player room membership together with the per-room puzzle and
+   * censor entries, so a room's state is never registered after the room has
+   * already been torn down.
+   */
+  private static final Object ROOM_LOCK = new Object();
+
+  /**
+   * This is an accessor method for the two-player room lock.
+   * @return the lock
+   */
+
+  public static Object getRoomLock() {
+    return ROOM_LOCK;
   }
 
   /**
@@ -186,6 +203,13 @@ public final class Chat {
       }
     }
     wordsToCensor.put(roomId, censorWords);
+  }
+
+  /** This method removes the words to censor for the given room id.
+   *
+   * @param roomId the room id */
+  public static void removeCensorWords(Integer roomId) {
+    wordsToCensor.remove(roomId);
   }
 
   /** This method actually censors the words, checking whether a word is in the
